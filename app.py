@@ -1,3 +1,18 @@
+# -*- coding: utf-8 -*-
+"""
+智问工坊 (PromptFactory) - 后端服务
+
+一个可视化的Web应用，允许用户通过界面完成以下工作流：
+1. 上传JSONL文件（每行是一个JSON对象）
+2. 编写动态提示词（支持变量插值）
+3. 配置大模型API参数
+4. 批量执行提示词并保存结果
+
+:author: Xixiang He
+:date: 2025/06/23
+:version: 1.0.0
+:license: MIT License
+"""
 from flask import Flask, render_template, request, jsonify, session
 from flask_cors import CORS
 import json
