@@ -8,6 +8,8 @@ let promptEditor = null;
 let isProcessing = false;
 let shouldCancel = false;
 let promptTemplates = [];
+let templates = [];
+let currentTemplate = null;
 
 // DOM元素
 const views = {
@@ -24,6 +26,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeMonacoEditor();
     loadProjects();
     loadPromptTemplates();
+    loadTemplates();
 });
 
 // 初始化应用
@@ -112,7 +115,12 @@ async function loadProjects() {
             projects = await response.json();
             renderProjects();
         } else {
-            showError('加载项目列表失败');
+            let errorMsg = '加载项目列表失败';
+            try {
+                const err = await response.json();
+                if (err && err.error) errorMsg = err.error;
+            } catch (e) {}
+            showError(errorMsg);
         }
     } catch (error) {
         showError(`加载项目列表失败: ${error.message}`);
@@ -180,7 +188,12 @@ async function openProject(projectId) {
             currentProject = await response.json();
             showProjectDetail();
         } else {
-            showError('加载项目失败');
+            let errorMsg = '加载项目失败';
+            try {
+                const err = await response.json();
+                if (err && err.error) errorMsg = err.error;
+            } catch (e) {}
+            showError(errorMsg);
         }
     } catch (error) {
         showError(`加载项目失败: ${error.message}`);
@@ -327,6 +340,15 @@ async function saveProject() {
         prompt_template: promptEditor ? promptEditor.getValue() : ''
     };
     
+    // 前端校验
+    if (!projectData.name) {
+        showError('项目名称不能为空');
+        return;
+    }
+    if (!projectData.api_config.api_url) {
+        showError('API URL 不能为空');
+        return;
+    }
     try {
         let response;
         if (currentProject) {
@@ -344,7 +366,6 @@ async function saveProject() {
                 body: JSON.stringify(projectData)
             });
         }
-        
         if (response.ok) {
             if (!currentProject) {
                 currentProject = await response.json();
@@ -352,7 +373,12 @@ async function saveProject() {
             await loadProjects();
             showProjectDetail();
         } else {
-            showError('保存项目失败');
+            let errorMsg = '保存项目失败';
+            try {
+                const err = await response.json();
+                if (err && err.error) errorMsg = err.error;
+            } catch (e) {}
+            showError(errorMsg);
         }
     } catch (error) {
         showError(`保存项目失败: ${error.message}`);
@@ -602,69 +628,90 @@ async function testPrompt() {
     }
 }
 
-// 开始处理
-async function startProcessing() {
+// ========== SSE 实时处理流 ==========
+async function startProcessingSSE() {
     if (!fileData || !promptEditor || !currentProject) {
         showError('请先上传文件并编写提示词');
         return;
     }
-    
     isProcessing = true;
     shouldCancel = false;
-    
     const startBtn = document.getElementById('startBtn');
     const cancelBtn = document.getElementById('cancelBtn');
     const progressContainer = document.querySelector('.progress-container');
-    
     if (startBtn) startBtn.style.display = 'none';
     if (cancelBtn) cancelBtn.style.display = 'inline-flex';
     if (progressContainer) progressContainer.style.display = 'block';
-    
-    const totalLines = fileData.data.length;
-    let successCount = 0;
-    let errorCount = 0;
-    
     const logOutput = document.getElementById('logOutput');
     if (logOutput) logOutput.innerHTML = '';
-    
-    log('info', `开始处理 ${totalLines} 行数据...`);
-    
-    try {
-        // 准备表单数据
-        const formData = new FormData();
-        formData.append('file', fileData.file);
-        formData.append('prompt_template', promptEditor.getValue());
-        formData.append('result_field_name', document.getElementById('resultFieldName').value || 'response');
-        formData.append('max_workers', document.getElementById('maxWorkers').value || '10');
-        
-        // 发送到服务器处理
-        const response = await fetch(`/api/projects/${currentProject.id}/process`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        if (response.ok) {
-            const result = await response.json();
-            successCount = result.success_count;
-            errorCount = result.error_count;
-            
-            log('success', `处理完成！成功: ${successCount}, 失败: ${errorCount}`);
-            
-            // 下载结果
-            downloadResults(result.processed_data);
-            
-        } else {
-            const error = await response.json();
-            throw new Error(error.error || '处理失败');
+    // 构造formData
+    const formData = new FormData();
+    formData.append('file', fileData.file);
+    formData.append('prompt_template', promptEditor.getValue());
+    formData.append('result_field_name', document.getElementById('resultFieldName').value || 'response');
+    formData.append('max_workers', document.getElementById('maxWorkers').value || '10');
+    // 发送请求，获取SSE流
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/process-stream/${currentProject.id}`);
+    xhr.responseType = 'text';
+    let received = '';
+    let processedData = [];
+    let logBuffer = [];
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 3 || xhr.readyState === 4) {
+            let chunk = xhr.responseText.substring(received.length);
+            received = xhr.responseText;
+            // 按SSE格式分割
+            const events = chunk.split(/\n\n/).filter(Boolean);
+            for (const evt of events) {
+                if (!evt.startsWith('data:')) continue;
+                const json = evt.replace(/^data:/, '').trim();
+                let msg;
+                try { msg = JSON.parse(json); } catch { continue; }
+                if (msg.type === 'log') {
+                    // 日志区只保留100条
+                    logBuffer.push(msg);
+                    if (logBuffer.length > 100) logBuffer = logBuffer.slice(-100);
+                    renderLogBuffer(logBuffer);
+                } else if (msg.type === 'progress') {
+                    updateProgress(msg.current, msg.total, msg.success, msg.error);
+                } else if (msg.type === 'done') {
+                    processedData = msg.processed_data || [];
+                    log('success', `处理完成！成功: ${msg.success}, 失败: ${msg.error}`);
+                    isProcessing = false;
+                    if (startBtn) startBtn.style.display = 'inline-flex';
+                    if (cancelBtn) cancelBtn.style.display = 'none';
+                    downloadResults(processedData);
+                } else if (msg.type === 'error') {
+                    log('error', msg.error || '未知错误');
+                }
+            }
         }
-        
-    } catch (error) {
-        log('error', `处理过程中发生错误: ${error.message}`);
-    } finally {
+    };
+    xhr.onloadend = function() {
         isProcessing = false;
         if (startBtn) startBtn.style.display = 'inline-flex';
         if (cancelBtn) cancelBtn.style.display = 'none';
-    }
+    };
+    xhr.send(formData);
+}
+
+function renderLogBuffer(logBuffer) {
+    const logOutput = document.getElementById('logOutput');
+    if (!logOutput) return;
+    logOutput.innerHTML = logBuffer.map(msg => {
+        let color = msg.status === 'success' ? '#4CAF50' : '#f44336';
+        let output = msg.output ? `<div style='color:#2196F3'>模型输出: <pre>${escapeHtml(msg.output)}</pre></div>` : '';
+        let error = msg.error ? `<div style='color:#f44336'>错误: ${escapeHtml(msg.error)}</div>` : '';
+        return `<div class='log-entry' style='color:${color}'>[第${msg.line}行] ${msg.status === 'success' ? '成功' : '失败'}${output}${error}</div>`;
+    }).join('');
+    logOutput.scrollTop = logOutput.scrollHeight;
+}
+function escapeHtml(str) {
+    return str.replace(/[&<>"']/g, function(tag) {
+        const chars = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'};
+        return chars[tag] || tag;
+    });
 }
 
 // 取消处理
@@ -882,4 +929,126 @@ function renderPromptTemplateSelector() {
             promptEditor.setValue(tpl.content);
         }
     };
-} 
+}
+
+// ========== 全局提示词模板库逻辑 ==========
+async function loadTemplates() {
+    const res = await fetch('/api/templates');
+    templates = await res.json();
+    renderTemplateList();
+}
+
+function renderTemplateList() {
+    const list = document.getElementById('templateList');
+    if (!list) return;
+    list.innerHTML = templates.map(t => `
+        <div class="template-item" onclick="previewTemplate('${t.id}')">
+            <div class="template-name">${t.name}</div>
+            <div class="template-desc">${t.description || ''}</div>
+        </div>
+    `).join('');
+}
+
+window.previewTemplate = function(id) {
+    currentTemplate = templates.find(t => t.id === id);
+    if (!currentTemplate) return;
+    document.getElementById('previewTemplateName').textContent = currentTemplate.name;
+    document.getElementById('previewTemplateDescription').textContent = currentTemplate.description;
+    document.getElementById('previewTemplateContent').textContent = currentTemplate.content;
+    document.getElementById('templatePreviewModal').style.display = 'flex';
+};
+
+function closeTemplatePreview() {
+    document.getElementById('templatePreviewModal').style.display = 'none';
+}
+
+function closeTemplateEdit() {
+    document.getElementById('templateEditModal').style.display = 'none';
+}
+
+// 新建模板
+const addTemplateBtn = document.getElementById('addTemplateBtn');
+if (addTemplateBtn) {
+    addTemplateBtn.onclick = function() {
+        currentTemplate = null;
+        document.getElementById('editModalTitle').textContent = '新建模板';
+        document.getElementById('templateNameInput').value = '';
+        document.getElementById('templateDescriptionInput').value = '';
+        document.getElementById('templateContentInput').value = '';
+        document.getElementById('templateEditModal').style.display = 'flex';
+    };
+}
+
+// 编辑模板
+const editTemplateBtn = document.getElementById('editTemplateBtn');
+if (editTemplateBtn) {
+    editTemplateBtn.onclick = function() {
+        if (!currentTemplate) return;
+        document.getElementById('editModalTitle').textContent = '编辑模板';
+        document.getElementById('templateNameInput').value = currentTemplate.name;
+        document.getElementById('templateDescriptionInput').value = currentTemplate.description;
+        document.getElementById('templateContentInput').value = currentTemplate.content;
+        document.getElementById('templateEditModal').style.display = 'flex';
+    };
+}
+
+// 删除模板
+const deleteTemplateBtn = document.getElementById('deleteTemplateBtn');
+if (deleteTemplateBtn) {
+    deleteTemplateBtn.onclick = async function() {
+        if (!currentTemplate) return;
+        if (!confirm('确定要删除该模板吗？')) return;
+        await fetch(`/api/templates/${currentTemplate.id}`, { method: 'DELETE' });
+        closeTemplatePreview();
+        await loadTemplates();
+    };
+}
+
+// 保存模板
+const saveTemplateBtn = document.getElementById('saveTemplateBtn');
+if (saveTemplateBtn) {
+    saveTemplateBtn.onclick = async function() {
+        const name = document.getElementById('templateNameInput').value.trim();
+        const description = document.getElementById('templateDescriptionInput').value.trim();
+        const content = document.getElementById('templateContentInput').value.trim();
+        if (!name || !content) {
+            alert('模板名称和内容不能为空');
+            return;
+        }
+        if (currentTemplate) {
+            // 编辑
+            await fetch(`/api/templates/${currentTemplate.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, description, content })
+            });
+        } else {
+            // 新建
+            await fetch('/api/templates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, description, content })
+            });
+        }
+        closeTemplateEdit();
+        closeTemplatePreview();
+        await loadTemplates();
+    };
+}
+
+// 插入模板到编辑器
+const insertTemplateBtn = document.getElementById('insertTemplateBtn');
+if (insertTemplateBtn) {
+    insertTemplateBtn.onclick = function() {
+        if (!currentTemplate || !promptEditor) return;
+        // 直接覆盖编辑器内容（如需追加可改为+=）
+        promptEditor.setValue(currentTemplate.content);
+        closeTemplatePreview();
+    };
+}
+
+// 初始化加载模板
+window.addEventListener('DOMContentLoaded', loadTemplates);
+
+// 替换原有startProcessing为startProcessingSSE
+window.startProcessing = startProcessingSSE; 

@@ -14,16 +14,36 @@ body {
 }
 
 .container {
-    max-width: 1400px;
-    margin: 0 auto;
+    margin-left: var(--sidebar-width);
+    width: calc(100vw - var(--sidebar-width));
+    max-width: calc(100vw - var(--sidebar-width));
     padding: 20px;
+    box-sizing: border-box;
+    overflow-x: auto;
 }
 
-/* 头部样式 */
+/* 侧边栏宽度变量 */
+:root {
+    --sidebar-width: 320px;
+}
+
+/* 主内容区全局自适应优化 */
+.view,
+.project-content,
+.processing-content {
+    width: 100%;
+    max-width: 100%;
+    padding-left: 0;
+    padding-right: 0;
+    box-sizing: border-box;
+}
+
+/* 头部自适应 */
 .header {
     text-align: center;
     margin-bottom: 40px;
     color: white;
+    width: 100%;
 }
 
 .header h1 {
@@ -72,6 +92,7 @@ body {
     grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
     gap: 20px;
     padding: 40px;
+    width: 100%;
 }
 
 .project-card {
@@ -123,10 +144,6 @@ body {
 }
 
 /* 项目详情 */
-.project-content {
-    padding: 40px;
-}
-
 .project-section {
     margin-bottom: 40px;
 }
@@ -223,10 +240,6 @@ body {
 }
 
 /* 编辑表单 */
-.edit-form {
-    padding: 40px;
-}
-
 .form-group {
     margin-bottom: 25px;
 }
@@ -313,10 +326,6 @@ body {
 }
 
 /* 处理视图 */
-.processing-content {
-    padding: 40px;
-}
-
 .processing-section {
     margin-bottom: 40px;
 }
@@ -698,6 +707,8 @@ body {
     max-height: 80vh;
     overflow: hidden;
     box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    display: flex;
+    flex-direction: column;
 }
 
 .modal-header {
@@ -706,6 +717,7 @@ body {
     align-items: center;
     padding: 20px;
     border-bottom: 1px solid #ddd;
+    flex-shrink: 0;
 }
 
 .modal-header h3 {
@@ -728,18 +740,29 @@ body {
 
 .modal-body {
     padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
 }
 
 .modal-footer {
     padding: 20px;
     border-top: 1px solid #ddd;
     text-align: right;
+    flex-shrink: 0;
 }
 
 /* 响应式设计 */
 @media (max-width: 768px) {
     .container {
+        margin-left: 0;
+        width: 100vw;
+        max-width: 100vw;
         padding: 10px;
+    }
+    
+    .sidebar {
+        display: none !important;
     }
     
     .header h1 {
@@ -772,6 +795,32 @@ body {
     .progress-stats {
         flex-direction: column;
         gap: 10px;
+    }
+}
+
+@media (max-width: 1200px) {
+    .container {
+        margin-left: 0;
+        width: 100vw;
+        max-width: 100vw;
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    .sidebar {
+        display: none !important;
+    }
+}
+
+@media (max-width: 900px) {
+    .container {
+        margin-left: 0;
+        width: 100vw;
+        max-width: 100vw;
+        padding-left: 4px;
+        padding-right: 4px;
+    }
+    .sidebar {
+        display: none !important;
     }
 }
 
@@ -837,4 +886,96 @@ body {
 }
 .collapsed {
     display: none !important;
+}
+
+.sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 320px;
+    height: 100vh;
+    background: #f8f9fa;
+    border-right: 1px solid #e9ecef;
+    z-index: 100;
+    padding: 0 0 30px 0;
+    display: flex;
+    flex-direction: column;
+}
+.sidebar-header {
+    padding: 30px 20px 10px 20px;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.sidebar-header h3 {
+    margin: 0;
+    font-size: 1.3rem;
+    color: #2c3e50;
+}
+.sidebar-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+}
+.template-item {
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    padding: 15px 18px;
+    margin-bottom: 15px;
+    cursor: pointer;
+    transition: box-shadow 0.2s;
+}
+.template-item:hover {
+    box-shadow: 0 4px 16px rgba(102,126,234,0.08);
+    border-color: #667eea;
+}
+.template-name {
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 1.1rem;
+}
+.template-desc {
+    color: #6c757d;
+    font-size: 0.95rem;
+    margin-top: 6px;
+}
+#templatePreviewModal .modal-content, #templateEditModal .modal-content {
+    max-width: 500px;
+    width: 90%;
+}
+#templatePreviewModal pre, #templateEditModal textarea {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 1rem;
+    color: #2c3e50;
+    margin-top: 10px;
+    min-height: 80px;
+    max-height: 300px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+}
+#templateEditModal input, #templateEditModal textarea {
+    width: 100%;
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 1rem;
+}
+#templateEditModal label {
+    font-weight: 600;
+    color: #2c3e50;
+    margin-top: 8px;
+    margin-bottom: 4px;
+    display: block;
+}
+
+.edit-form {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 20px;
 } 

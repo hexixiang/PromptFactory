@@ -13,7 +13,7 @@
 :version: 1.0.0
 :license: MIT License
 """
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify, session, Response
 from flask_cors import CORS
 import json
 import os
@@ -24,6 +24,8 @@ from werkzeug.utils import secure_filename
 import requests
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import queue
+import time
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # 在生产环境中应该使用环境变量
@@ -49,6 +51,11 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    # 检查并添加 prompt_template 字段（兼容老库）
+    cursor.execute("PRAGMA table_info(projects)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'prompt_template' not in columns:
+        cursor.execute("ALTER TABLE projects ADD COLUMN prompt_template TEXT")
     
     # 创建处理记录表
     cursor.execute('''
@@ -62,6 +69,18 @@ def init_db():
             status TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (project_id) REFERENCES projects (id)
+        )
+    ''')
+    
+    # 创建全局提示词模板表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS prompt_templates (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
@@ -105,34 +124,37 @@ def get_projects():
 def create_project():
     """创建新项目"""
     data = request.json
-    project_id = str(uuid.uuid4())
-    
-    conn = sqlite3.connect('projects.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        INSERT INTO projects (id, name, description, api_config, prompt_template)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (
-        project_id,
-        data.get('name', '新项目'),
-        data.get('description', ''),
-        json.dumps(data.get('api_config', {})),
-        data.get('prompt_template', '')
-    ))
-    
-    conn.commit()
-    conn.close()
-    
-    return jsonify({
-        'id': project_id,
-        'name': data.get('name', '新项目'),
-        'description': data.get('description', ''),
-        'api_config': data.get('api_config', {}),
-        'prompt_template': data.get('prompt_template', ''),
-        'created_at': datetime.now().isoformat(),
-        'updated_at': datetime.now().isoformat()
-    })
+    if not data.get('name'):
+        return jsonify({'error': '项目名称不能为空'}), 400
+    if not data.get('api_config', {}).get('api_url'):
+        return jsonify({'error': 'API URL 不能为空'}), 400
+    try:
+        project_id = str(uuid.uuid4())
+        conn = sqlite3.connect('projects.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO projects (id, name, description, api_config, prompt_template)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (
+            project_id,
+            data.get('name', '新项目'),
+            data.get('description', ''),
+            json.dumps(data.get('api_config', {})),
+            data.get('prompt_template', '')
+        ))
+        conn.commit()
+        conn.close()
+        return jsonify({
+            'id': project_id,
+            'name': data.get('name', '新项目'),
+            'description': data.get('description', ''),
+            'api_config': data.get('api_config', {}),
+            'prompt_template': data.get('prompt_template', ''),
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({'error': f'数据库写入失败: {str(e)}'}), 500
 
 @app.route('/api/projects/<project_id>', methods=['GET'])
 def get_project(project_id):
@@ -165,30 +187,32 @@ def get_project(project_id):
 def update_project(project_id):
     """更新项目"""
     data = request.json
-    
-    conn = sqlite3.connect('projects.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        UPDATE projects 
-        SET name = ?, description = ?, api_config = ?, prompt_template = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-    ''', (
-        data.get('name', ''),
-        data.get('description', ''),
-        json.dumps(data.get('api_config', {})),
-        data.get('prompt_template', ''),
-        project_id
-    ))
-    
-    if cursor.rowcount == 0:
+    if not data.get('name'):
+        return jsonify({'error': '项目名称不能为空'}), 400
+    if not data.get('api_config', {}).get('api_url'):
+        return jsonify({'error': 'API URL 不能为空'}), 400
+    try:
+        conn = sqlite3.connect('projects.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE projects 
+            SET name = ?, description = ?, api_config = ?, prompt_template = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (
+            data.get('name', ''),
+            data.get('description', ''),
+            json.dumps(data.get('api_config', {})),
+            data.get('prompt_template', ''),
+            project_id
+        ))
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'error': '项目不存在'}), 404
+        conn.commit()
         conn.close()
-        return jsonify({'error': '项目不存在'}), 404
-    
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'message': '项目更新成功'})
+        return jsonify({'message': '项目更新成功'})
+    except Exception as e:
+        return jsonify({'error': f'数据库更新失败: {str(e)}'}), 500
 
 @app.route('/api/projects/<project_id>', methods=['DELETE'])
 def delete_project(project_id):
@@ -579,6 +603,158 @@ def delete_prompt_template(template_id):
     save_templates(new_templates)
     return jsonify({'success': True})
 # ================== End 提示词模板工厂 API ==================
+
+# ========== 全局提示词模板API ==========
+@app.route('/api/templates', methods=['GET'])
+def get_templates():
+    """获取所有提示词模板"""
+    conn = sqlite3.connect('projects.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, name, description, content, created_at, updated_at FROM prompt_templates ORDER BY updated_at DESC')
+    templates = []
+    for row in cursor.fetchall():
+        templates.append({
+            'id': row[0],
+            'name': row[1],
+            'description': row[2],
+            'content': row[3],
+            'created_at': row[4],
+            'updated_at': row[5]
+        })
+    conn.close()
+    return jsonify(templates)
+
+@app.route('/api/templates', methods=['POST'])
+def create_template():
+    """新建提示词模板"""
+    data = request.json
+    template_id = str(uuid.uuid4())
+    conn = sqlite3.connect('projects.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO prompt_templates (id, name, description, content)
+        VALUES (?, ?, ?, ?)
+    ''', (
+        template_id,
+        data.get('name', '新模板'),
+        data.get('description', ''),
+        data.get('content', '')
+    ))
+    conn.commit()
+    conn.close()
+    return jsonify({'id': template_id, 'name': data.get('name', '新模板'), 'description': data.get('description', ''), 'content': data.get('content', '')})
+
+@app.route('/api/templates/<template_id>', methods=['PUT'])
+def update_template(template_id):
+    """编辑提示词模板"""
+    data = request.json
+    conn = sqlite3.connect('projects.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE prompt_templates SET name=?, description=?, content=?, updated_at=CURRENT_TIMESTAMP WHERE id=?
+    ''', (
+        data.get('name', ''),
+        data.get('description', ''),
+        data.get('content', ''),
+        template_id
+    ))
+    conn.commit()
+    conn.close()
+    return jsonify({'id': template_id, 'name': data.get('name', ''), 'description': data.get('description', ''), 'content': data.get('content', '')})
+
+@app.route('/api/templates/<template_id>', methods=['DELETE'])
+def delete_template(template_id):
+    """删除提示词模板"""
+    conn = sqlite3.connect('projects.db')
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM prompt_templates WHERE id=?', (template_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+# ========== End 全局提示词模板API ==========
+
+def sse_format(data):
+    """格式化为SSE消息"""
+    import json
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+@app.route('/api/process-stream/<project_id>', methods=['POST'])
+def process_stream(project_id):
+    """SSE流式推送批量处理进度和日志"""
+    # 先把所有 request 相关数据取出来
+    prompt_template = request.form.get('prompt_template', '')
+    result_field_name = request.form.get('result_field_name', 'response')
+    max_workers = int(request.form.get('max_workers', 10))
+    file = request.files.get('file')
+    if not file:
+        def error_gen():
+            yield sse_format({'type': 'error', 'error': '未上传文件'})
+        return Response(error_gen(), mimetype='text/event-stream')
+    file_content = file.read().decode('utf-8')
+    def generate():
+        lines = file_content.split('\n')
+        data = []
+        for i, line in enumerate(lines):
+            if not line.strip():
+                continue
+            try:
+                data.append(json.loads(line))
+            except Exception as e:
+                yield sse_format({'type': 'error', 'line': i+1, 'error': f'第{i+1}行JSON解析失败: {str(e)}'})
+        if not data:
+            yield sse_format({'type': 'error', 'error': '文件中没有有效的JSON数据'})
+            return
+        # 获取项目API配置
+        conn = sqlite3.connect('projects.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT api_config FROM projects WHERE id = ?', (project_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            yield sse_format({'type': 'error', 'error': '项目不存在'})
+            return
+        api_config = json.loads(row[0]) if row[0] else {}
+        total = len(data)
+        success_count = 0
+        error_count = 0
+        processed_count = 0
+        processed_data = []
+        def worker(idx, item, q):
+            try:
+                processed_item, error = call_llm_api(item, prompt_template, api_config, result_field_name)
+                if error:
+                    q.put({'type': 'log', 'line': idx+1, 'status': 'error', 'output': '', 'error': error})
+                    return (item, error)
+                else:
+                    q.put({'type': 'log', 'line': idx+1, 'status': 'success', 'output': processed_item.get(result_field_name, ''), 'error': ''})
+                    return (processed_item, None)
+            except Exception as e:
+                q.put({'type': 'log', 'line': idx+1, 'status': 'error', 'output': '', 'error': str(e)})
+                return (item, str(e))
+        q = queue.Queue()
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(worker, idx, item, q) for idx, item in enumerate(data)]
+            for i in range(total):
+                # 每次有日志就推送
+                log = q.get()
+                yield sse_format(log)
+                processed_count += 1
+                if log['status'] == 'success':
+                    success_count += 1
+                else:
+                    error_count += 1
+                # 推送进度
+                yield sse_format({'type': 'progress', 'current': processed_count, 'total': total, 'success': success_count, 'error': error_count})
+            # 收集结果
+            for f in futures:
+                res, err = f.result()
+                if not err:
+                    processed_data.append(res)
+        # 处理完成，推送最终结果
+        yield sse_format({'type': 'done', 'success': success_count, 'error': error_count, 'total': total, 'processed_data': processed_data})
+        return
+    return Response(generate(), mimetype='text/event-stream')
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001, use_reloader=False) 
