@@ -191,6 +191,7 @@
                                 <span>可用变量：</span>
                                 <div id="variableList2" class="variable-tags"></div>
                             </div>
+                            <div id="promptTemplateSelector" style="margin-left: 20px;"></div>
                             <button class="btn btn-secondary" id="testPromptBtn">测试提示词</button>
                         </div>
                         <div id="promptEditor" class="prompt-editor"></div>
@@ -201,16 +202,13 @@
                     </div>
                     
                     <div id="testResult" class="test-result" style="display: none;">
-                        <h4>测试结果：</h4>
-                        <div class="test-content">
-                            <div class="test-prompt">
-                                <strong>渲染后的提示词：</strong>
-                                <pre id="renderedPrompt"></pre>
+                        <h4>API响应：</h4>
+                        <div class="collapsible-container">
+                            <div class="collapsible-header">
+                                <button class="btn btn-secondary btn-sm" onclick="toggleCollapse('apiResponse')">折叠/展开</button>
+                                <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('apiResponse')">复制</button>
                             </div>
-                            <div class="test-response">
-                                <strong>API响应：</strong>
-                                <pre id="apiResponse"></pre>
-                            </div>
+                            <pre id="apiResponse" class="collapsible-content" style="max-height: 200px; overflow:auto;"></pre>
                         </div>
                     </div>
                 </div>

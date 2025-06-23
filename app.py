@@ -44,6 +44,7 @@ def init_db():
             name TEXT NOT NULL,
             description TEXT,
             api_config TEXT,
+            prompt_template TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -110,13 +111,14 @@ def create_project():
     cursor = conn.cursor()
     
     cursor.execute('''
-        INSERT INTO projects (id, name, description, api_config)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO projects (id, name, description, api_config, prompt_template)
+        VALUES (?, ?, ?, ?, ?)
     ''', (
         project_id,
         data.get('name', '新项目'),
         data.get('description', ''),
-        json.dumps(data.get('api_config', {}))
+        json.dumps(data.get('api_config', {})),
+        data.get('prompt_template', '')
     ))
     
     conn.commit()
@@ -127,6 +129,7 @@ def create_project():
         'name': data.get('name', '新项目'),
         'description': data.get('description', ''),
         'api_config': data.get('api_config', {}),
+        'prompt_template': data.get('prompt_template', ''),
         'created_at': datetime.now().isoformat(),
         'updated_at': datetime.now().isoformat()
     })
@@ -168,12 +171,13 @@ def update_project(project_id):
     
     cursor.execute('''
         UPDATE projects 
-        SET name = ?, description = ?, api_config = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, description = ?, api_config = ?, prompt_template = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
     ''', (
         data.get('name', ''),
         data.get('description', ''),
         json.dumps(data.get('api_config', {})),
+        data.get('prompt_template', ''),
         project_id
     ))
     
@@ -526,6 +530,55 @@ def call_llm_api(data_item, prompt_template, api_config, result_field_name):
         processed_item = data_item.copy()
         processed_item[result_field_name] = f"错误: {str(e)}"
         return processed_item, str(e)
+
+# ================== 提示词模板工厂 API ==================
+TEMPLATE_FILE = os.path.join('data', 'prompt_templates.json')
+
+def load_templates():
+    if not os.path.exists(TEMPLATE_FILE):
+        return []
+    with open(TEMPLATE_FILE, 'r', encoding='utf-8') as f:
+        try:
+            return json.load(f)
+        except Exception:
+            return []
+
+def save_templates(templates):
+    with write_lock:
+        with open(TEMPLATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(templates, f, ensure_ascii=False, indent=2)
+
+@app.route('/api/prompt-templates', methods=['GET'])
+def get_prompt_templates():
+    """获取所有提示词模板"""
+    templates = load_templates()
+    return jsonify(templates)
+
+@app.route('/api/prompt-templates', methods=['POST'])
+def add_prompt_template():
+    """新增提示词模板"""
+    data = request.json
+    templates = load_templates()
+    new_template = {
+        'id': str(uuid.uuid4()),
+        'name': data.get('name', '未命名模板'),
+        'description': data.get('description', ''),
+        'content': data.get('content', '')
+    }
+    templates.append(new_template)
+    save_templates(templates)
+    return jsonify({'success': True, 'template': new_template})
+
+@app.route('/api/prompt-templates/<template_id>', methods=['DELETE'])
+def delete_prompt_template(template_id):
+    """删除指定ID的提示词模板"""
+    templates = load_templates()
+    new_templates = [tpl for tpl in templates if tpl['id'] != template_id]
+    if len(new_templates) == len(templates):
+        return jsonify({'success': False, 'error': '模板不存在'}), 404
+    save_templates(new_templates)
+    return jsonify({'success': True})
+# ================== End 提示词模板工厂 API ==================
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001, use_reloader=False) 

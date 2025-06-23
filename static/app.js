@@ -7,6 +7,7 @@ let variables = [];
 let promptEditor = null;
 let isProcessing = false;
 let shouldCancel = false;
+let promptTemplates = [];
 
 // DOM元素
 const views = {
@@ -22,6 +23,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
     initializeMonacoEditor();
     loadProjects();
+    loadPromptTemplates();
 });
 
 // 初始化应用
@@ -158,8 +160,6 @@ function renderProjects() {
 function showCreateProject() {
     currentProject = null;
     showView('projectEditView');
-    
-    // 清空表单
     document.getElementById('editProjectName').value = '';
     document.getElementById('editProjectDescription').value = '';
     document.getElementById('editApiUrl').value = '';
@@ -169,6 +169,7 @@ function showCreateProject() {
     document.getElementById('editMaxTokens').value = '1000';
     document.getElementById('editTimeout').value = '30';
     document.getElementById('editRateLimit').value = '5';
+    if (promptEditor) promptEditor.setValue('');
 }
 
 // 打开项目
@@ -294,15 +295,10 @@ function editProject(projectId = null) {
             currentProject = project;
         }
     }
-    
     if (!currentProject) return;
-    
     showView('projectEditView');
-    
-    // 填充表单
     document.getElementById('editProjectName').value = currentProject.name;
     document.getElementById('editProjectDescription').value = currentProject.description || '';
-    
     const apiConfig = currentProject.api_config || {};
     document.getElementById('editApiUrl').value = apiConfig.api_url || '';
     document.getElementById('editModelName').value = apiConfig.modelName || '';
@@ -311,6 +307,7 @@ function editProject(projectId = null) {
     document.getElementById('editMaxTokens').value = apiConfig.max_tokens || '1000';
     document.getElementById('editTimeout').value = apiConfig.timeout || '30';
     document.getElementById('editRateLimit').value = apiConfig.rate_limit || '5';
+    if (promptEditor) promptEditor.setValue(currentProject.prompt_template || '');
 }
 
 // 保存项目
@@ -326,7 +323,8 @@ async function saveProject() {
             max_tokens: parseInt(document.getElementById('editMaxTokens').value),
             timeout: parseInt(document.getElementById('editTimeout').value),
             rate_limit: parseInt(document.getElementById('editRateLimit').value)
-        }
+        },
+        prompt_template: promptEditor ? promptEditor.getValue() : ''
     };
     
     try {
@@ -588,35 +586,20 @@ async function testPrompt() {
         const result = await response.json();
         
         if (response.ok && result.success) {
-            document.getElementById('renderedPrompt').textContent = result.rendered_prompt;
             document.getElementById('apiResponse').textContent = result.response;
             document.getElementById('testResult').style.display = 'block';
             log('success', '提示词测试成功');
         } else {
-            document.getElementById('renderedPrompt').textContent = result.rendered_prompt || renderPrompt(prompt, testData);
             document.getElementById('apiResponse').textContent = `错误: ${result.error || 'API调用失败'}`;
             document.getElementById('testResult').style.display = 'block';
             log('error', `提示词测试失败: ${result.error || 'API调用失败'}`);
         }
         
     } catch (error) {
-        const testData = fileData.data[0];
-        document.getElementById('renderedPrompt').textContent = renderPrompt(prompt, testData);
         document.getElementById('apiResponse').textContent = `错误: ${error.message}`;
         document.getElementById('testResult').style.display = 'block';
         log('error', `提示词测试失败: ${error.message}`);
     }
-}
-
-// 渲染提示词 - 使用更精确的变量匹配规则
-function renderPrompt(template, data) {
-    // 使用更精确的正则表达式：
-    // 1. 匹配{{变量名}}格式，其中变量名只能包含字母、数字、下划线
-    // 2. 确保{{和}}之间没有空格
-    // 3. 避免匹配转义的大括号
-    return template.replace(/\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g, (match, key) => {
-        return data[key] !== undefined ? data[key] : match;
-    });
 }
 
 // 开始处理
@@ -828,4 +811,75 @@ window.startQuickProcess = startQuickProcess;
 window.saveProject = saveProject;
 window.closeModal = closeModal;
 window.toggleEditPassword = toggleEditPassword;
-window.insertVariable = insertVariable; 
+window.insertVariable = insertVariable;
+
+// 折叠/展开内容
+function toggleCollapse(elementId) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    if (el.style.display === 'none' || el.classList.contains('collapsed')) {
+        el.style.display = '';
+        el.classList.remove('collapsed');
+    } else {
+        el.style.display = 'none';
+        el.classList.add('collapsed');
+    }
+}
+
+// 一键复制内容
+function copyToClipboard(elementId) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    const text = el.textContent || el.innerText;
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+            showModal('复制成功', '内容已复制到剪贴板');
+        }, () => {
+            showModal('复制失败', '无法复制内容');
+        });
+    } else {
+        // 兼容旧浏览器
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+            showModal('复制成功', '内容已复制到剪贴板');
+        } catch (err) {
+            showModal('复制失败', '无法复制内容');
+        }
+        document.body.removeChild(textarea);
+    }
+}
+
+// 新增：加载预设模板
+async function loadPromptTemplates() {
+    try {
+        const response = await fetch('/static/prompt_templates.json');
+        if (response.ok) {
+            promptTemplates = await response.json();
+            renderPromptTemplateSelector();
+        }
+    } catch (e) {
+        // 忽略
+    }
+}
+
+function renderPromptTemplateSelector() {
+    const container = document.getElementById('promptTemplateSelector');
+    if (!container) return;
+    let html = '<select id="templateSelect"><option value="">选择预设模板</option>';
+    promptTemplates.forEach(t => {
+        html += `<option value="${t.id}">${t.name}</option>`;
+    });
+    html += '</select>';
+    container.innerHTML = html;
+    document.getElementById('templateSelect').onchange = function() {
+        const id = this.value;
+        const tpl = promptTemplates.find(t => t.id == id);
+        if (tpl && promptEditor) {
+            promptEditor.setValue(tpl.content);
+        }
+    };
+} 
