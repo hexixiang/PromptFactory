@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PromptFactory - 项目管理</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://unpkg.com/monaco-editor@0.45.0/min/vs/loader.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🤖 PromptFactory</h1>
+            <p>多项目管理 · 批量处理 · 配置保存</p>
+        </header>
+
+        <!-- 项目列表视图 -->
+        <div id="projectListView" class="view active">
+            <div class="view-header">
+                <h2>📁 项目管理</h2>
+                <button class="btn btn-primary" onclick="showCreateProject()">
+                    <span>➕</span> 创建新项目
+                </button>
+            </div>
+
+            <div id="projectsList" class="projects-grid">
+                <!-- 项目卡片将在这里动态生成 -->
+            </div>
+        </div>
+
+        <!-- 项目详情视图 -->
+        <div id="projectDetailView" class="view">
+            <div class="view-header">
+                <button class="btn btn-secondary" onclick="showProjectList()">
+                    <span>←</span> 返回项目列表
+                </button>
+                <h2 id="projectName">项目详情</h2>
+                <div class="project-actions">
+                    <button class="btn btn-secondary" onclick="editProject()">编辑项目</button>
+                    <button class="btn btn-danger" onclick="deleteProject()">删除项目</button>
+                </div>
+            </div>
+
+            <div class="project-content">
+                <!-- 项目配置 -->
+                <div class="project-section">
+                    <h3>⚙️ 项目配置</h3>
+                    <div class="config-display" id="projectConfig">
+                        <!-- 配置信息将在这里显示 -->
+                    </div>
+                </div>
+
+                <!-- 处理历史 -->
+                <div class="project-section">
+                    <h3>📊 处理历史</h3>
+                    <div class="history-list" id="processingHistory">
+                        <!-- 处理记录将在这里显示 -->
+                    </div>
+                </div>
+
+                <!-- 快速处理 -->
+                <div class="project-section">
+                    <h3>🚀 快速处理</h3>
+                    <div class="quick-process">
+                        <button class="btn btn-primary" onclick="startQuickProcess()">
+                            开始新处理
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 项目编辑视图 -->
+        <div id="projectEditView" class="view">
+            <div class="view-header">
+                <button class="btn btn-secondary" onclick="showProjectDetail()">
+                    <span>←</span> 返回项目详情
+                </button>
+                <h2>编辑项目</h2>
+                <button class="btn btn-primary" onclick="saveProject()">保存项目</button>
+            </div>
+
+            <div class="edit-form">
+                <div class="form-group">
+                    <label for="editProjectName">项目名称</label>
+                    <input type="text" id="editProjectName" placeholder="输入项目名称">
+                </div>
+
+                <div class="form-group">
+                    <label for="editProjectDescription">项目描述</label>
+                    <textarea id="editProjectDescription" placeholder="输入项目描述"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>API配置</label>
+                    <div class="api-config-form">
+                        <div class="config-row">
+                            <div class="config-group">
+                                <label for="editApiUrl">API地址 *</label>
+                                <input type="url" id="editApiUrl" placeholder="https://api.openai.com/v1/chat/completions">
+                            </div>
+                            <div class="config-group">
+                                <label for="editModelName">模型名称 *</label>
+                                <input type="text" id="editModelName" placeholder="gpt-4">
+                            </div>
+                        </div>
+
+                        <div class="config-group">
+                            <label for="editApiKey">API密钥 *</label>
+                            <div class="password-input">
+                                <input type="password" id="editApiKey" placeholder="sk-...">
+                                <button type="button" class="toggle-password" onclick="toggleEditPassword()">👁️</button>
+                            </div>
+                        </div>
+
+                        <div class="config-row">
+                            <div class="config-group">
+                                <label for="editTemperature">温度 (0-2)</label>
+                                <input type="number" id="editTemperature" value="0.7" min="0" max="2" step="0.1">
+                            </div>
+                            <div class="config-group">
+                                <label for="editMaxTokens">最大生成长度</label>
+                                <input type="number" id="editMaxTokens" value="1000" min="1" max="4000">
+                            </div>
+                        </div>
+
+                        <div class="config-row">
+                            <div class="config-group">
+                                <label for="editTimeout">超时时间 (秒)</label>
+                                <input type="number" id="editTimeout" value="30" min="5" max="300">
+                            </div>
+                            <div class="config-group">
+                                <label for="editRateLimit">请求频率限制 (次/秒)</label>
+                                <input type="number" id="editRateLimit" value="5" min="1" max="50">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 处理视图 -->
+        <div id="processingView" class="view">
+            <div class="view-header">
+                <button class="btn btn-secondary" onclick="showProjectDetail()">
+                    <span>←</span> 返回项目详情
+                </button>
+                <h2>文件处理</h2>
+            </div>
+
+            <div class="processing-content">
+                <!-- 文件上传 -->
+                <div class="processing-section">
+                    <h3>📁 上传文件</h3>
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-content">
+                            <div class="upload-icon">📄</div>
+                            <p>拖拽JSONL文件到此处，或点击选择文件</p>
+                            <p class="upload-hint">支持的文件格式：.jsonl (每行一个JSON对象)</p>
+                            <input type="file" id="fileInput" accept=".jsonl,.json" hidden>
+                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                选择文件
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="filePreview" class="file-preview" style="display: none;">
+                        <h4>文件预览</h4>
+                        <div class="file-info">
+                            <span id="fileName"></span>
+                            <span id="fileSize"></span>
+                            <span id="lineCount"></span>
+                        </div>
+                        <div class="preview-data">
+                            <h5>首行数据样例：</h5>
+                            <pre id="firstLinePreview"></pre>
+                        </div>
+                        <div class="available-vars">
+                            <h5>可用变量：</h5>
+                            <div id="variableList" class="variable-tags"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 提示词编辑 -->
+                <div class="processing-section">
+                    <h3>✍️ 编写提示词</h3>
+                    <div class="prompt-editor-container">
+                        <div class="editor-header">
+                            <div class="available-variables">
+                                <span>可用变量：</span>
+                                <div id="variableList2" class="variable-tags"></div>
+                            </div>
+                            <button class="btn btn-secondary" id="testPromptBtn">测试提示词</button>
+                        </div>
+                        <div id="promptEditor" class="prompt-editor"></div>
+                        <div class="editor-footer">
+                            <label for="resultFieldName">结果字段名：</label>
+                            <input type="text" id="resultFieldName" value="response" placeholder="response">
+                        </div>
+                    </div>
+                    
+                    <div id="testResult" class="test-result" style="display: none;">
+                        <h4>测试结果：</h4>
+                        <div class="test-content">
+                            <div class="test-prompt">
+                                <strong>渲染后的提示词：</strong>
+                                <pre id="renderedPrompt"></pre>
+                            </div>
+                            <div class="test-response">
+                                <strong>API响应：</strong>
+                                <pre id="apiResponse"></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 执行处理 -->
+                <div class="processing-section">
+                    <h3>🚀 执行处理</h3>
+                    <div class="execution-settings">
+                        <div class="setting-group">
+                            <label for="maxWorkers">并发工作线程数：</label>
+                            <input type="number" id="maxWorkers" value="10" min="1" max="50" class="setting-input">
+                            <span class="setting-hint">建议值：5-20，根据API限制调整</span>
+                        </div>
+                    </div>
+                    <div class="execution-controls">
+                        <button class="btn btn-primary" id="startBtn">开始处理</button>
+                        <button class="btn btn-danger" id="cancelBtn" style="display: none;">取消处理</button>
+                    </div>
+                    
+                    <div class="progress-container" style="display: none;">
+                        <div class="progress-info">
+                            <span id="progressText">准备中...</span>
+                            <span id="progressCount">0 / 0</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <div class="progress-stats">
+                            <span>成功: <span id="successCount">0</span></span>
+                            <span>失败: <span id="errorCount">0</span></span>
+                            <span>剩余: <span id="remainingCount">0</span></span>
+                        </div>
+                    </div>
+                    
+                    <div class="log-container">
+                        <h4>处理日志</h4>
+                        <div id="logOutput" class="log-output"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框 -->
+    <div id="modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">确认</h3>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="modalMessage"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+                <button class="btn btn-primary" id="modalConfirmBtn">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html> 
