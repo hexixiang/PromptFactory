@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  promptfactory:
+    build: .
+    image: promptfactory:latest
+    container_name: promptfactory
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./data:/app/data
+      - promptfactory_db:/app
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - promptfactory_network
+
+networks:
+  promptfactory_network:
+    driver: bridge
+
+volumes:
+  promptfactory_db: 

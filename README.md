@@ -199,6 +199,141 @@ python app.py
 {"text": "深度学习网络结构", "user_input": "神经网络是什么？", "category": "research", "response": "神经网络是模仿人脑神经元连接方式..."}
 ```
 
+## 🐳 Docker 部署
+
+### 在 WSL 中构建 ARM 镜像
+
+#### 1. 环境准备
+
+首先确保您的WSL环境中已安装Docker并启用了buildx：
+
+```bash
+# 检查Docker版本
+docker --version
+
+# 检查buildx是否可用
+docker buildx version
+
+# 创建并使用多平台构建器
+docker buildx create --name multiarch --driver docker-container --use
+docker buildx inspect --bootstrap
+```
+
+#### 2. 构建 ARM 镜像
+
+```bash
+# 构建 ARM64 镜像
+docker build --platform linux/arm64 -t promptfactory:arm64 .
+
+# 构建多平台镜像（ARM64 + AMD64）
+docker buildx build --platform linux/arm64,linux/amd64 -t promptfactory:latest .
+
+# 构建并推送到Docker Hub（可选）
+docker buildx build --platform linux/arm64,linux/amd64 -t yourusername/promptfactory:latest --push .
+```
+
+#### 3. 拉取和运行镜像
+
+如果您已经将镜像推送到镜像仓库，可以直接拉取：
+
+```bash
+# 拉取 ARM64 镜像
+docker pull yourusername/promptfactory:latest
+
+# 运行容器
+docker run -d \
+  --name promptfactory \
+  -p 5001:5001 \
+  -v $(pwd)/data:/app/data \
+  yourusername/promptfactory:latest
+```
+
+#### 4. 本地运行（不推送到仓库）
+
+```bash
+# 构建并加载到本地Docker
+docker buildx build --platform linux/arm64 -t promptfactory:arm64 --load .
+
+# 运行容器
+docker run -d \
+  --name promptfactory \
+  -p 5001:5001 \
+  -v $(pwd)/data:/app/data \
+  promptfactory:arm64
+```
+
+#### 5. Docker Compose 部署
+
+创建 `docker-compose.yml` 文件：
+
+```yaml
+version: '3.8'
+
+services:
+  promptfactory:
+    image: promptfactory:arm64
+    container_name: promptfactory
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./data:/app/data
+      - promptfactory_db:/app
+    environment:
+      - FLASK_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  promptfactory_db:
+```
+
+启动服务：
+
+```bash
+# 启动服务
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+
+# 停止服务
+docker-compose down
+```
+
+### 镜像拉取命令汇总
+
+```bash
+# 如果镜像已发布到Docker Hub
+docker pull yourusername/promptfactory:latest
+
+# 指定ARM64架构
+docker pull --platform linux/arm64 yourusername/promptfactory:latest
+
+# 运行容器（简单方式）
+docker run -d -p 5001:5001 --name promptfactory yourusername/promptfactory:latest
+
+# 运行容器（带数据卷挂载）
+docker run -d \
+  --name promptfactory \
+  -p 5001:5001 \
+  -v $(pwd)/data:/app/data \
+  -v promptfactory_db:/app/projects.db \
+  yourusername/promptfactory:latest
+```
+
+### 镜像特性
+
+- ✅ **多架构支持**: ARM64 和 AMD64
+- ✅ **安全性**: 非root用户运行
+- ✅ **健康检查**: 自动监控应用状态
+- ✅ **数据持久化**: 支持数据卷挂载
+- ✅ **生产就绪**: 优化的Python环境
+
 ## 数据库结构
 
 应用使用SQLite数据库存储以下信息：

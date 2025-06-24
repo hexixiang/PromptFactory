@@ -1,0 +1,72 @@
+# Git相关
+.git
+.gitignore
+
+# Python相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 虚拟环境
+venv/
+env/
+.venv/
+.env/
+
+# IDE相关
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 操作系统相关
+.DS_Store
+Thumbs.db
+
+# 数据库文件（运行时生成）
+*.db
+*.sqlite
+*.sqlite3
+projects.db
+
+# 日志文件
+*.log
+
+# 临时文件
+*.tmp
+*.temp
+
+# Docker相关
+Dockerfile
+.dockerignore
+
+# 文档和图片（可选，如果镜像不需要）
+README.md
+构建项目的提示词.md
+imgs/
+
+# Node modules（如果有的话）
+node_modules/
+
+# 测试相关
+.pytest_cache/
+.coverage
+htmlcov/ 
